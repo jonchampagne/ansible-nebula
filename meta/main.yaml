@@ -1,0 +1,5 @@
+---
+galaxy_info:
+  author: Jon Champagne
+  description: An ansible role to provision a nebula VPN network
+  
