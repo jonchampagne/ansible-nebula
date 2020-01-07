@@ -30,7 +30,7 @@
 - name: Verify nebula CIDR is valid
   fail:
     msg: "{{ nebula_cidr }} is not a valid CIDR value"
-  when: nebula_cidr|int < 0 or nebula_cidr > 32
+  when: nebula_cidr|int < 0 or nebula_cidr|int > 32
 
 - name: Verify nebula_bin_dir is defined
   fail:
@@ -78,6 +78,20 @@
   when:
   - nebula_ca_present is not defined
 
+- name: Verify there is at least 1 lighthouse defined
+  set_fact:
+    nebula_lighthouse_present: 'true'
+  when:
+  - hostvars[item].nebula_lighthouse is defined
+  - hostvars[item].nebula_lighthouse|bool
+  with_items: "{{ ansible_play_hosts }}"
+
+- name: Fail if there are no lighthouses
+  fail:
+    msg: "No lighthouses defined"
+  when:
+  - nebula_lighthouse_present is not defined
+
 - name: Create nebula_bin_dir
   file:
     path: "{{ nebula_bin_dir }}"
@@ -119,7 +133,7 @@
     - -name 
     - "{{ item }}"
     - -ip 
-    - "{{ hostvars[item].nebula_ip }}/{{ hostvars[item].nebula_cidr }}"
+    - "{{ hostvars[item].nebula_ip }}/{{ hostvars[item].nebula_cidr | default(24) }}"
     - -ca-crt 
     - "{{ nebula_certificate_dir }}/ca.crt"
     - -ca-key 
