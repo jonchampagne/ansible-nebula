@@ -1,1 +1,238 @@
 ---
+- name: Fail if not a supported architecture
+  fail:
+    msg: "{{ ansible_architecture }} not supported"
+  when: 
+  - ansible_architecture != "x86_64"
+  - ansible_architecture != "armv7l"
+
+- name: Verify nebula version is defined
+  fail:
+    msg: "Nebula version not defined"
+  when: nebula_version is not defined
+
+- name: Verify nebula IP address is set
+  fail:
+    msg: "nebula_ip not set"
+  when: nebula_ip is not defined
+
+# regex from https://www.regextester.com/22
+- name: Verify nebula IP is valid
+  fail:
+    msg: "{{ nebula_ip }} is not a valid IP address"
+  when: nebula_ip is not match('^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$')
+
+- name: Verify nebula CIDR is set
+  fail:
+    msg: "nebula_cidr not set"
+  when: nebula_cidr is not defined
+
+- name: Verify nebula CIDR is valid
+  fail:
+    msg: "{{ nebula_cidr }} is not a valid CIDR value"
+  when: nebula_cidr|int < 0 or nebula_cidr > 32
+
+- name: Verify nebula_bin_dir is defined
+  fail:
+    msg: "nebula_bin_dir not defined"
+  when: nebula_bin_dir is not defined
+
+- name: Verify nebula ca name is set
+  fail:
+    msg: "nebula_ca_name is not set"
+  when:
+  - nebula_ca is defined
+  - nebula_ca_name is not defined
+
+- name: Verify nebula_config_dir is set
+  fail:
+    msg: "nebula_config_dir is not set"
+  when: nebula_config_dir is not defined
+
+- name: Verify nebula_certificate_dir is set
+  fail:
+    msg: "nebula_certificate_dir is not set"
+  when: nebula_certificate_dir is not defined
+
+- name: Define download url for x86_64
+  set_fact:
+    nebula_download_url: "https://github.com/slackhq/nebula/releases/download/{{ nebula_version }}/nebula-linux-amd64.tar.gz"
+  when: ansible_architecture == "x86_64"
+
+- name: Define download url for armv7l
+  set_fact:
+    nebula_download_url: "https://github.com/slackhq/nebula/releases/download/{{ nebula_version }}/nebula-linux-arm6.tar.gz"
+  when: ansible_architecture == "armv7l"
+
+- name: Verify there is at least 1 CA defined
+  set_fact:
+    nebula_ca_present: 'true'
+  when: 
+  - hostvars[item].nebula_ca is defined
+  - hostvars[item].nebula_ca
+  with_items: "{{ ansible_play_hosts }}"
+
+- name: Fail if there are no CAs
+  fail:
+    msg: "No hosts marked as nebula_ca"
+  when:
+  - nebula_ca_present is not defined
+
+- name: Create nebula_bin_dir
+  file:
+    path: "{{ nebula_bin_dir }}"
+    state: directory
+
+- name: Extract nebula tarball
+  unarchive:
+    src: "{{ nebula_download_url }}"
+    dest: "{{ nebula_bin_dir }}"
+    remote_src: true
+
+- name: Check if CA already present
+  stat:
+    path: "{{ nebula_certificate_dir }}/ca.key"
+  register: nebula_key
+  when:
+  - nebula_ca is defined
+  - nebula_ca|bool
+
+- name: Create certificate directory
+  file:
+    path: "{{ nebula_certificate_dir }}"
+    state: directory
+
+- name: Create CA if not present
+  command: "{{ nebula_bin_dir }}/nebula-cert ca -name \"{{ nebula_ca_name }}\" -out-crt \"{{ nebula_certificate_dir }}\"/ca.crt -out-key \"{{ nebula_certificate_dir }}\"/ca.key"
+  when:
+  - nebula_ca is defined
+  - nebula_key is defined
+  - nebula_key.stat.exists is defined
+  - not nebula_key.stat.exists|bool
+
+# ./nebula-cert sign -name test -ip 10.5.0.10/24 -ca-crt ./config/certificates/ca.crt -ca-key ./config/certificates/ca.key -out-crt ./config/certificates/test.crt -out-key ./config/certificates/test.key
+- name: Generate new certificates
+  command:
+    argv:
+    - "{{ nebula_bin_dir }}/nebula-cert"
+    - sign
+    - -name 
+    - "{{ item }}"
+    - -ip 
+    - "{{ hostvars[item].nebula_ip }}/{{ hostvars[item].nebula_cidr }}"
+    - -ca-crt 
+    - "{{ nebula_certificate_dir }}/ca.crt"
+    - -ca-key 
+    - "{{ nebula_certificate_dir }}/ca.key"
+    - -out-crt 
+    - "{{ nebula_certificate_dir }}/{{ item }}.crt"
+    - -out-key 
+    - "{{ nebula_certificate_dir }}/{{ item }}.key"
+  when:
+  - nebula_ca is defined
+  - nebula_ca|bool
+  with_items: "{{ ansible_play_hosts }}"
+  ignore_errors: yes
+
+- name: Create local temp directory
+  local_action:
+    module: tempfile
+    state: directory
+  run_once: true
+  register: local_tmp
+  become: false
+
+- name: Fetch the certificates
+  fetch:
+    src: "{{ nebula_certificate_dir }}/{{ item }}.crt"
+    dest: "{{ local_tmp.path }}/"
+    flat: yes
+  when:
+  - nebula_ca is defined
+  - nebula_ca|bool
+  with_items: 
+  - "{{ ansible_play_hosts }}"
+  - "ca"
+
+- name: Fetch the keys
+  fetch:
+    src: "{{ nebula_certificate_dir }}/{{ item }}.key"
+    dest: "{{ local_tmp.path }}/"
+    flat: yes
+  when:
+  - nebula_ca is defined
+  - nebula_ca|bool
+  with_items:
+  - "{{ ansible_play_hosts }}"
+  - "ca"
+
+- name: Delete client certificates and keys on CA
+  command: echo "Not implemented"
+
+- name: Push host certificates and keys
+  copy:
+    src: "{{ local_tmp.path }}/{{ inventory_hostname }}.{{ item }}"
+    dest: "{{ nebula_certificate_dir }}/{{ inventory_hostname }}.{{ item }}"
+  with_items:
+  - "crt"
+  - "key"
+
+- name: Push CA certificate
+  copy:
+    src: "{{ local_tmp.path }}/ca.crt"
+    dest: "{{ nebula_certificate_dir }}/ca.crt"
+
+# TODO: Change this to a dig lookup
+- name: Lookup resolvable hostname of lighthouses
+  set_fact:
+    lighthouse_server_ip: "{{ hostvars[item].ansible_host }}"
+    lighthouse_nebula_ip: "{{ hostvars[item].nebula_ip }}"
+  with_items: "{{ ansible_play_hosts }}"
+  when:
+  - hostvars[item].nebula_lighthouse is defined
+  - hostvars[item].nebula_lighthouse|bool
+
+- name: Create lighthouse config file
+  template:
+    src: "../templates/config.lighthouse.yaml.j2"
+    dest: "{{ nebula_config_dir }}/config.yaml"
+  when: 
+  - nebula_lighthouse is defined
+  - nebula_lighthouse|bool
+
+- name: Create client config file
+  template:
+    src: "../templates/config.client.yaml.j2"
+    dest: "{{ nebula_config_dir }}/config.yaml"
+  when: nebula_lighthouse is not defined or not nebula_lighthouse|bool
+
+- name: Install systemd service
+  template:
+    src: "../templates/nebula.service.j2"
+    dest: "/etc/systemd/system/nebula.service"
+
+- name: Enable and start the nebula service
+  systemd:
+    name: nebula
+    state: restarted
+    enabled: true
+
+- name: Restart SSH
+  systemd:
+    name: ssh
+    state: restarted
+  ignore_errors: yes
+
+- name: Verify connectivity between hosts
+  block:
+    - name: Check connectivity
+      wait_for:
+        host: "{{ hostvars[item].nebula_ip }}"
+        port: "{{ hostvars[item].ansible_port | default(22) }}"
+        timeout: 30
+      with_items: "{{ ansible_play_hosts }}"
+      retries: 5
+  rescue:
+    - name: Show error message
+      debug:
+        msg: Warning! Not all hosts can communicate
