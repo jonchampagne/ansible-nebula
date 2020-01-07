@@ -1,0 +1,12 @@
+[Unit]
+Description=Nebula VPN
+After=network.target
+
+[Service]
+Restart=always
+Type=simple
+WorkingDirectory={{ nebula_bin_dir }}
+ExecStart={{ nebula_bin_dir }}/nebula -config {{ nebula_config_dir }}/config.yaml
+
+[Install]
+WantedBy=multi-user.target
