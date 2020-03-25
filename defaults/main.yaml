@@ -1,5 +1,5 @@
 ---
-nebula_version: 'v1.0.0'
+nebula_version: 'v1.1.0'
 nebula_bin_dir: '/usr/local/bin/'
 nebula_ca: 'false'
 nebula_ip: 'invalid'
@@ -7,5 +7,6 @@ nebula_cidr: '24'
 nebula_ca_name: nebula
 nebula_config_dir: /etc/nebula/
 nebula_certificate_dir: "{{ nebula_config_dir }}/certificates"
-nebula_lighthouse: false
+nebula_lighthouse: 'false'
 nebula_port: 4242
+nebula_lighthouse_address: "example.com"

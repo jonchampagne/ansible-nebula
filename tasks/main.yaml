@@ -199,7 +199,7 @@
 # TODO: Change this to a dig lookup
 - name: Lookup resolvable hostname of lighthouses
   set_fact:
-    lighthouse_server_ip: "{{ hostvars[item].ansible_host }}"
+    lighthouse_server_ip: "{{ nebula_lighthouse_address }}"
     lighthouse_nebula_ip: "{{ hostvars[item].nebula_ip }}"
   with_items: "{{ ansible_play_hosts }}"
   when:
